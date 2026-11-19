@@ -25,7 +25,7 @@ RUN_PY := PYTHONPATH=. $(PYTHON_EXEC)
 # Resilient linter executable detection (prefers venv/python module, falls back to standalone CLI)
 RUFF_EXEC := $(shell if $(PYTHON_EXEC) -m ruff --version >/dev/null 2>&1; then echo "$(RUN_PY) -m ruff"; elif command -v ruff >/dev/null 2>&1; then echo "ruff"; else echo "$(RUN_PY) -m ruff"; fi)
 
-.PHONY: help bootstrap resync doctor test lint audit demo demo-synthetic demo-rl clean init setup validate-config backtest report status emergency-stop daily-summary analytics
+.PHONY: help bootstrap resync doctor test lint audit demo demo-synthetic demo-rl fetch train train-quick clean init setup validate-config backtest report status emergency-stop daily-summary analytics
 
 help:
 	@echo "MT5 AI/ML Trading Bot - Developer Commands"
@@ -40,6 +40,9 @@ help:
 	@echo "demo           : Run the bot in demo mode (requires MT5/MetaAPI)"
 	@echo "demo-synthetic : [QUICK] Run strategy benchmark demo with synthetic data"
 	@echo "demo-rl        : [QUICK] Run RL agent evaluation demo with synthetic data"
+	@echo "fetch          : [DATA] Download historical OHLCV bars into data/raw"
+	@echo "train          : [ML] Train PPO + LSTM on the newest CSV in data/raw"
+	@echo "train-quick    : [QUICK] Synthetic fetch + training smoke test (no MT5)"
 	@echo "clean          : Remove temporary files and build artifacts"
 	@echo "init           : [ONE-COMMAND] Automated system initialization"
 	@echo "validate-config: [CONTRACT] Validate environment and .env"
@@ -83,6 +86,19 @@ demo-synthetic:
 demo-rl:
 	@echo "Running Synthetic RL Evaluation Demo..."
 	$(RUN_PY) src/research/rl_evaluation_demo.py
+
+fetch:
+	@echo "Downloading historical data (XAUUSD M5 since 2023-01-01)..."
+	$(RUN_PY) scripts/fetch_history.py --symbol XAUUSD --timeframe M5 --start 2023-01-01
+
+train:
+	@echo "Training PPO + LSTM on the newest CSV in data/raw..."
+	$(RUN_PY) scripts/train_models.py --data latest --model all
+
+train-quick:
+	@echo "Synthetic end-to-end training smoke test..."
+	$(RUN_PY) scripts/fetch_history.py --synthetic --bars 20000 --no-merge
+	$(RUN_PY) scripts/train_models.py --data latest --model all --ppo-steps 20000 --lstm-epochs 2 --max-samples 3000
 
 setup:
 	$(RUN_PY) main.py --setup

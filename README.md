@@ -145,6 +145,23 @@ start.bat doctor     :: environment diagnostics
 start.bat synthetic  :: synthetic-data demo, no .env or MT5 required
 ```
 
+#### Data & model training
+
+The database (`data/trades.db`) is created automatically — it stores trades and audit events,
+not market history. Price history and model weights are produced on your machine:
+
+```bat
+train.bat            :: fetch XAUUSD history from MT5, then train PPO + LSTM
+train.bat synthetic  :: pipeline smoke test on synthetic bars (no MT5, no .env)
+make fetch           :: download historical OHLCV into data/raw/
+make train           :: train on the newest CSV in data/raw/
+```
+
+Artifacts land in `models/trained/` as `ppo_xauusd.zip` / `lstm_xauusd.pt`, the names
+`main.py` loads from `--model-dir`. See [docs/TRAINING_PIPELINE.md](./docs/TRAINING_PIPELINE.md)
+for data sources (MT5 / MetaAPI / synthetic), the `MODEL_PATH` startup gate, and scheduling
+the pipeline with Task Scheduler, cron or GitHub Actions.
+
 ### 2. Quick Evaluation (No-Config Demo)
 You can evaluate the system's analytical and RL capabilities immediately using synthetic data, without requiring MT5 credentials or pre-trained models:
 
