@@ -3,7 +3,7 @@ Extended tests for the benchmarking framework, focusing on slippage and new base
 """
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -116,19 +116,19 @@ def test_regime_filter_comparison(sample_data):
 
 def test_adapter_robustness_short_df():
     """Test that adapters handle DataFrames shorter than window_size."""
-    # Mock torch for this test if it's not present
-    if "torch" not in sys.modules:
-        sys.modules["torch"] = MagicMock()
+    # Mock torch for this test only. Leaking a MagicMock into sys.modules["torch"]
+    # poisons later tests: scipy's array-api helpers call issubclass(cls, torch.Tensor)
+    # and a MagicMock is not a class, raising TypeError far away from here.
+    with patch.dict(sys.modules, {"torch": MagicMock()}):
+        mock_model = MagicMock()
+        adapter = EnsembleAdapter(mock_model, window_size=60)
 
-    mock_model = MagicMock()
-    adapter = EnsembleAdapter(mock_model, window_size=60)
+        short_df = pd.DataFrame({"close": np.random.randn(10)})
+        signals = adapter.predict(short_df)
 
-    short_df = pd.DataFrame({"close": np.random.randn(10)})
-    signals = adapter.predict(short_df)
-
-    assert len(signals) == 10
-    assert np.all(signals == 0)
-    assert not mock_model.predict.called
+        assert len(signals) == 10
+        assert np.all(signals == 0)
+        assert not mock_model.predict.called
 
 
 def test_supertrend_signals(sample_data):

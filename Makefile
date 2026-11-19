@@ -25,7 +25,7 @@ RUN_PY := PYTHONPATH=. $(PYTHON_EXEC)
 # Resilient linter executable detection (prefers venv/python module, falls back to standalone CLI)
 RUFF_EXEC := $(shell if $(PYTHON_EXEC) -m ruff --version >/dev/null 2>&1; then echo "$(RUN_PY) -m ruff"; elif command -v ruff >/dev/null 2>&1; then echo "ruff"; else echo "$(RUN_PY) -m ruff"; fi)
 
-.PHONY: help bootstrap resync doctor test lint audit demo demo-synthetic demo-rl fetch train train-quick clean init setup validate-config backtest report status emergency-stop daily-summary analytics
+.PHONY: help bootstrap resync doctor test lint audit demo demo-synthetic demo-rl fetch train train-quick auto auto-status clean init setup validate-config backtest report status emergency-stop daily-summary analytics
 
 help:
 	@echo "MT5 AI/ML Trading Bot - Developer Commands"
@@ -43,6 +43,8 @@ help:
 	@echo "fetch          : [DATA] Download historical OHLCV bars into data/raw"
 	@echo "train          : [ML] Train PPO + LSTM on the newest CSV in data/raw"
 	@echo "train-quick    : [QUICK] Synthetic fetch + training smoke test (no MT5)"
+	@echo "auto           : [ML] Fetch missing bars + train missing/stale models"
+	@echo "auto-status    : [ML] Show what auto_pipeline.py would do (no changes)"
 	@echo "clean          : Remove temporary files and build artifacts"
 	@echo "init           : [ONE-COMMAND] Automated system initialization"
 	@echo "validate-config: [CONTRACT] Validate environment and .env"
@@ -99,6 +101,13 @@ train-quick:
 	@echo "Synthetic end-to-end training smoke test..."
 	$(RUN_PY) scripts/fetch_history.py --synthetic --bars 20000 --no-merge
 	$(RUN_PY) scripts/train_models.py --data latest --model all --ppo-steps 20000 --lstm-epochs 2 --max-samples 3000
+
+auto:
+	@echo "Checking data + model freshness (fetch/train only when needed)..."
+	$(RUN_PY) scripts/auto_pipeline.py --ensure
+
+auto-status:
+	@$(RUN_PY) scripts/auto_pipeline.py --status
 
 setup:
 	$(RUN_PY) main.py --setup

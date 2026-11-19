@@ -18,10 +18,16 @@ from typing import Any
 
 import psutil
 import structlog
-import telegram
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 from src.core.config import TradingConfig
+
+# Telegram alerting is optional: a missing/broken python-telegram-bot install must
+# degrade alerting only, never prevent the trading system from importing.
+try:  # pragma: no cover - depends on optional dependency
+    import telegram
+except ImportError:  # pragma: no cover
+    telegram = None  # type: ignore[assignment]
 
 logger = structlog.get_logger(__name__)
 
@@ -135,7 +141,13 @@ class Monitor:
         psutil.cpu_percent(interval=None)
 
         telegram_token = self.cfg.telegram_token.get_secret_value()
-        if telegram_token:
+        if telegram_token and telegram is None:
+            logger.warning(
+                "telegram_disabled",
+                reason="python-telegram-bot is not installed",
+                remedy="pip install python-telegram-bot (or clear TELEGRAM_TOKEN)",
+            )
+        elif telegram_token:
             try:
                 self.bot = telegram.Bot(token=telegram_token)
                 logger.info("telegram_bot_initialized")

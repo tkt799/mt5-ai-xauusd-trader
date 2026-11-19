@@ -495,7 +495,16 @@ def check_git_config():
                 "Run 'git config --global user.name \"Your Name\"' and 'git config --global user.email \"your@email.com\"'",
             )
     except FileNotFoundError:
-        return DiagnosticCheck("Git Configuration", "FAILED", "Git not found", "Install Git.")
+        # Git is only needed for contributing; the trading engine runs without it, so this
+        # must not flip the doctor into the "SYSTEM HAS CRITICAL ISSUES" state.
+        return DiagnosticCheck(
+            "Git Configuration",
+            "WARNING",
+            "Git not detected (optional: only needed for contributing)",
+            "Optional for running the bot; ignore this if you downloaded a ZIP. "
+            "To contribute, install Git (winget install --id Git.Git -e) and set "
+            "'git config --global user.name' / 'git config --global user.email'.",
+        )
     except Exception as e:
         return DiagnosticCheck("Git Configuration", "WARNING", f"Error checking Git: {e}")
 
@@ -665,7 +674,9 @@ def check_contribution_safety():
         utility_files = []
 
         for f in files:
-            is_sensitive = any(f.startswith(z) for z in SENSITIVE_ZONES) or f in EXPLICIT_SENSITIVE_FILES
+            is_sensitive = (
+                any(f.startswith(z) for z in SENSITIVE_ZONES) or f in EXPLICIT_SENSITIVE_FILES
+            )
             is_safe = any(f.startswith(z) for z in SAFE_ZONES) or f in EXPLICIT_SAFE_FILES
 
             if is_sensitive:
