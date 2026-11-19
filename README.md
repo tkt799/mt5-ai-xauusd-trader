@@ -128,6 +128,23 @@ bash scripts/bootstrap.sh
 
 If `python3` points to another version, invoke the script from an activated Python 3.11 environment. The bootstrapper stops rather than creating a partially installed environment.
 
+#### Windows one-click launch
+
+Windows users can skip the manual steps above and double-click **`start.bat`** in the
+repository root. On first run it locates Python 3.11, creates `venv`, installs
+`requirements.txt`, prepares `data/`, `logs/`, `models/trained/`, and generates `.env`
+from `.env.example` (SQLite by default), then opens an interactive menu:
+
+```bat
+start.bat            :: interactive menu (doctor / setup / demo / backtest / live)
+start.bat demo       :: demo trading, XAUUSD, ensemble
+start.bat live       :: live trading (requires typing YES to confirm)
+start.bat backtest   :: walk-forward backtest
+start.bat install    :: force reinstall dependencies
+start.bat doctor     :: environment diagnostics
+start.bat synthetic  :: synthetic-data demo, no .env or MT5 required
+```
+
 ### 2. Quick Evaluation (No-Config Demo)
 You can evaluate the system's analytical and RL capabilities immediately using synthetic data, without requiring MT5 credentials or pre-trained models:
 

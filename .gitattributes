@@ -1,0 +1,7 @@
+# Keep Windows entrypoints on CRLF so cmd.exe parses labels and goto correctly.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Shell scripts and Python stay on LF.
+*.sh            text eol=lf
+*.py            text eol=lf
