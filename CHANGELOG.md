@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Automatic data + model refresh (`scripts/auto_pipeline.py`):** detects missing or stale
+  OHLCV datasets and checkpoints, fetches only the missing tail (merged into a stable
+  `data/raw/<SYMBOL>_<TF>.csv`), retrains what is missing/stale, and records the outcome in
+  `reports/auto_pipeline_state.json`. Modes: `--status`, `--ensure`, `--loop`. Wired into
+  `start.bat auto` (menu [10]) and `make auto` / `make auto-status`; documented in
+  `docs/AUTO_PIPELINE.md`.
+- **Untrained-model detection:** `HealthChecker.check_models()` now inspects whether a model
+  wrapper actually holds trained weights (`weights_loaded` / underlying estimator) instead of
+  trusting object presence, and fails the startup gate with an actionable remedy.
+- **Checkpoint dimension inference:** `LSTMModel` derives `input_dim` from the saved
+  `state_dict` when the caller does not specify it, so models trained by
+  `scripts/train_models.py` (248 features with MTF) load into `main.py` again instead of
+  failing on the hardcoded 140-feature default.
+
 - **Structured Iteration Heartbeat:** Implemented a high-fidelity polling cycle heartbeat in `main.py` with failure attribution and processing latency tracking.
 - **Enhanced Observability Metrics:** Added new Prometheus metrics (`trading_iteration_heartbeat_timestamp`, `trading_iteration_duration_seconds`, `trading_market_stability`) to the `Monitor` module for real-time system health tracking.
 - **Trace Correlation:** Updated Telegram alerting to automatically include `trace_id` snippets for direct linkage between mobile alerts and system logs.
@@ -191,6 +205,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core**: Add enterprise TradingConfig with Pydantic-v2 settings management
 - Add live trading safety supervisor
 
+### Fixed
+- **Silent no-trade / noise-trading startup:** `--algo ppo` without a checkpoint used to
+  report HEALTHY while every signal was `HOLD`; `--algo lstm` used randomly initialised
+  weights. Both are now rejected at the health gate with a training remedy.
+- **Regime model persistence:** `save_model`/`load_model` no longer treat an unreadable
+  config as a signature violation; unsigned checkpoints load with a warning, while a signed
+  checkpoint without a key remains fail-closed.
+- **Optional Telegram dependency:** `src/core/monitor.py` no longer fails the whole package
+  import when `python-telegram-bot` is absent; alerting degrades with a warning.
+- **Test-suite torch leak:** `test_adapter_robustness_short_df` injected a `MagicMock` into
+  `sys.modules["torch"]` without cleanup, breaking nine later tests in
+  `test_rl_evaluation.py` via scipy's `issubclass` probe.
+- **Doctor Git check:** a missing `git` binary is a WARNING ("optional, only needed for
+  contributing"), not a CRITICAL failure.
 ### Changed
 - Optimized `FeatureEngineer` technical analysis pipeline, achieving ~17% reduction in latency.
 - Integrated PREPROD_CHECKLIST.md validation into release gates.

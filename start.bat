@@ -286,6 +286,7 @@ echo    [6] 启动前健康检查 (--check)
 echo    [7] 合成数据演示             无需 .env / 无需 MT5
 echo    [8] 重新安装依赖             修复依赖安装问题
 echo    [9] 查看完整帮助 (--help)
+echo   [10] 数据+模型自动更新        缺数据就抓取, 缺模型就训练
 echo    [0] 退出
 echo ----------------------------------------------------------------
 set "EXTRA="
@@ -301,6 +302,7 @@ if "%CHOICE%"=="6" goto :m_check
 if "%CHOICE%"=="7" goto :m_synthetic
 if "%CHOICE%"=="8" goto :m_reinstall
 if "%CHOICE%"=="9" goto :m_help
+if "%CHOICE%"=="10" goto :m_auto
 if "%CHOICE%"=="0" goto :bye
 echo [无效] 输入的序号: %CHOICE%
 goto :menu
@@ -353,6 +355,11 @@ call :run_help
 call :pause_back
 goto :menu
 
+:m_auto
+call :run_auto
+call :pause_back
+goto :menu
+
 :pause_back
 echo.
 echo 按任意键返回主菜单...
@@ -384,6 +391,7 @@ if /i "%CMD%"=="synthetic" goto :x_synthetic
 if /i "%CMD%"=="rl" goto :x_rl
 if /i "%CMD%"=="test" goto :x_test
 if /i "%CMD%"=="help" goto :x_help
+if /i "%CMD%"=="auto" goto :x_auto
 if /i "%CMD%"=="menu" goto :menu
 echo [运行] 参数原样传给 main.py: %*
 "%VENV_PY%" "main.py" %*
@@ -437,6 +445,10 @@ goto :executed
 call :run_help
 goto :executed
 
+:x_auto
+call :run_auto
+goto :executed
+
 REM ===========================================================================
 REM  动作实现
 REM ===========================================================================
@@ -459,6 +471,16 @@ exit /b 0
 :run_help
 echo.
 "%VENV_PY%" "main.py" --help
+exit /b 0
+
+:run_auto
+echo.
+echo [更新] 检查历史数据与 AI 模型 (缺少或过期才动作) ...
+echo ----------------------------------------------------------------
+"%VENV_PY%" "scripts\auto_pipeline.py" --ensure !EXTRA!
+set "RC=!errorlevel!"
+echo ----------------------------------------------------------------
+if not "!RC!"=="0" echo [提示] 自动更新未完成, 请查看上方日志 (常见原因: 未安装 PyTorch / MT5 未连接).
 exit /b 0
 
 :run_check

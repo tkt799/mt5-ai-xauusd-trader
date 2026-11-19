@@ -158,7 +158,24 @@ make train           :: train on the newest CSV in data/raw/
 ```
 
 Artifacts land in `models/trained/` as `ppo_xauusd.zip` / `lstm_xauusd.pt`, the names
-`main.py` loads from `--model-dir`. See [docs/TRAINING_PIPELINE.md](./docs/TRAINING_PIPELINE.md)
+`main.py` loads from `--model-dir`.
+
+#### Keep data and models up to date (automatic)
+
+`scripts/auto_pipeline.py` checks both artifacts and only acts when something is missing or
+stale — no more silent `HOLD` from an untrained model:
+
+```bat
+start.bat auto                                   :: menu [10], one-shot check + fetch + train
+python scripts/auto_pipeline.py --status         :: read-only report
+python scripts/auto_pipeline.py --ensure         :: fetch the missing tail, train what is missing
+python scripts/auto_pipeline.py --loop --refresh-hours 12 --retrain-days 7
+make auto-status / make auto                     :: same, from make
+```
+
+A checkpoint written while the bot is running is picked up on the **next restart** (there is
+no hot swap yet). See [docs/AUTO_PIPELINE.md](./docs/AUTO_PIPELINE.md) for the decision
+rules, the state file, and Task Scheduler / cron examples. See [docs/TRAINING_PIPELINE.md](./docs/TRAINING_PIPELINE.md)
 for data sources (MT5 / MetaAPI / synthetic), the `MODEL_PATH` startup gate, and scheduling
 the pipeline with Task Scheduler, cron or GitHub Actions.
 
