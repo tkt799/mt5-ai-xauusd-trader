@@ -85,6 +85,24 @@ class HealthReport(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+def _has_trained_weights(component: object) -> bool:
+    """Return True when a model wrapper actually holds trained weights.
+
+    Wrapper objects are cheap to construct (``LSTMModel()``, ``PPOAgent()``) and
+    exist even when no checkpoint was found, in which case they predict from
+    randomly initialised weights.  Treating those as "loaded" makes the startup
+    gate report HEALTHY for a bot that can only ever emit HOLD (or noise), so
+    trainedness is checked explicitly instead of trusting object presence.
+    """
+    if component is None:
+        return False
+    flag = getattr(component, "weights_loaded", None)
+    if isinstance(flag, bool):
+        return flag
+    # SB3 / torch wrappers keep the underlying estimator on ``.model``.
+    return getattr(component, "model", None) is not None
+
+
 class HealthChecker:
     """
     Enterprise health checker for production monitoring and startup gating.
@@ -345,13 +363,22 @@ class HealthChecker:
         status = HealthStatus.HEALTHY
         remedy = "N/A"
 
-        # 1. Discover loaded components
-        if getattr(self.model, "ppo_agent", None) is not None:
-            loaded.append("ppo")
-        if getattr(self.model, "lstm_model", None) is not None:
-            loaded.append("lstm")
-        if getattr(self.model, "dreamer_agent", None) is not None:
-            loaded.append("dreamer")
+        # 1. Discover components that actually carry trained weights.
+        # A wrapper object that exists but was built from random initial weights is
+        # NOT usable: its predictions are noise, so it must not count as "loaded".
+        untrained: list[str] = []
+        for attr, name in (
+            ("ppo_agent", "ppo"),
+            ("lstm_model", "lstm"),
+            ("dreamer_agent", "dreamer"),
+        ):
+            component = getattr(self.model, attr, None)
+            if component is None:
+                continue
+            if _has_trained_weights(component):
+                loaded.append(name)
+            else:
+                untrained.append(name)
 
         # Check for Transformer
         if (
@@ -360,19 +387,20 @@ class HealthChecker:
         ):
             loaded.append("transformer")
 
-        # Fallback for individual wrappers
+        # Fallback for individual wrappers (PPOAgent / LSTMModel / DreamerAgent).
+        # The class name only says which architecture was *requested*; trainedness
+        # still comes from _has_trained_weights().
         if not loaded:
             class_name = self.model.__class__.__name__.lower()
-            if "ppo" in class_name:
-                loaded.append("ppo")
-            elif "lstm" in class_name:
-                loaded.append("lstm")
-            elif "transformer" in class_name:
-                loaded.append("transformer")
-            elif "dreamer" in class_name:
-                loaded.append("dreamer")
-            elif hasattr(self.model, "predict"):
-                loaded.append(class_name)
+            candidates = ("ppo", "lstm", "transformer", "dreamer")
+            matched = next((name for name in candidates if name in class_name), None)
+            if matched is None and hasattr(self.model, "predict"):
+                matched = class_name
+            if matched is not None:
+                if _has_trained_weights(self.model):
+                    loaded.append(matched)
+                else:
+                    untrained.append(matched)
 
         # 2. Validate against configuration
         if algo == "ensemble":
@@ -384,24 +412,48 @@ class HealthChecker:
             if not present:
                 status = HealthStatus.FAILED
                 msg = f"Ensemble algorithm configured but no base models ({', '.join(essential)}) loaded"
-                remedy = f"Ensure model files for {', '.join(essential)} exist in models/trained/"
+                remedy = (
+                    f"Train weights for {', '.join(essential)}: run "
+                    "'python scripts/auto_pipeline.py --ensure' (fetch data + train), "
+                    "or train.bat, so files exist in models/trained/"
+                )
             elif len(present) < len(essential):
                 status = HealthStatus.DEGRADED
                 missing = essential - present
                 msg = (
                     f"Ensemble DEGRADED: {', '.join(present)} active | Missing {', '.join(missing)}"
                 )
-                remedy = f"Load missing components: {', '.join(missing)}"
+                remedy = (
+                    f"Load missing components: {', '.join(missing)} "
+                    "(python scripts/auto_pipeline.py --ensure)"
+                )
             else:
                 msg = f"Ensemble HEALTHY: All components ({', '.join(present)}) active"
         else:
             # Single algorithm check
             if algo not in loaded:
                 status = HealthStatus.FAILED
-                msg = f"Algorithm mismatch: Configured for '{algo}' but loaded '{', '.join(loaded) or 'None'}'"
-                remedy = f"Update ALGORITHM in .env to match loaded model or provide weights for '{algo}'"
+                if algo in untrained:
+                    msg = (
+                        f"Model '{algo}' exists but has NO trained weights (random initialisation)"
+                    )
+                else:
+                    msg = f"Algorithm mismatch: Configured for '{algo}' but loaded '{', '.join(loaded) or 'None'}'"
+                remedy = (
+                    f"Train weights for '{algo}' (python scripts/auto_pipeline.py --ensure), "
+                    "or update ALGORITHM in .env to match the model you do have"
+                )
             else:
                 msg = f"Model '{algo}' loaded and active"
+
+        if untrained and status != HealthStatus.FAILED:
+            # Randomly initialised weights would trade pure noise - never call it healthy.
+            status = HealthStatus.FAILED
+            msg += f" | UNTRAINED (random weights): {', '.join(sorted(set(untrained)))}"
+            remedy = (
+                "These components have no trained checkpoint. Run "
+                "'python scripts/auto_pipeline.py --ensure' or train.bat before trading."
+            )
 
         # 3. Performance Metrics Integration
         if status != HealthStatus.FAILED and hasattr(self.model, "get_health_metrics"):

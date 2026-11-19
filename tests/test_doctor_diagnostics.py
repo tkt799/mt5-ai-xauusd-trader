@@ -130,6 +130,16 @@ class TestDoctorDiagnostics(unittest.TestCase):
             self.assertEqual(res.status, "WARNING")
             self.assertIn("user.name or user.email not set", res.message)
 
+    def test_check_git_config_git_not_installed(self):
+        """Git missing must be a warning: the trading engine does not need Git."""
+        with patch("subprocess.run", side_effect=FileNotFoundError("git")):
+            res = doctor.check_git_config()
+            self.assertEqual(res.status, "WARNING")
+            self.assertIn("Git not detected", res.message)
+        # The remedy has to explain that this is optional, not just "Install Git.".
+        self.assertIn("optional", res.remedy.lower())
+        self.assertIn("contribute", res.remedy.lower())
+
     def test_check_branch_naming_valid(self):
         """Verify branch naming check passes for valid prefixes."""
         valid_branches = [
@@ -189,9 +199,9 @@ class TestDoctorDiagnostics(unittest.TestCase):
             patch("sys.real_prefix", create=True),
             patch(
                 "scripts.doctor.hasattr",
-                side_effect=lambda obj, attr: False
-                if attr == "real_prefix"
-                else hasattr(obj, attr),
+                side_effect=lambda obj, attr: (
+                    False if attr == "real_prefix" else hasattr(obj, attr)
+                ),
             ),
         ):
             res = doctor.check_venv()

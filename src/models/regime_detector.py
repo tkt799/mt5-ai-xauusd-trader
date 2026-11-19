@@ -961,6 +961,21 @@ class RegimeDetector:
 
         logger.info("gmm_fit_complete", n_clusters=n_selected, bic=best_bic)
 
+    @staticmethod
+    def _signing_key() -> str | None:
+        """Return the configured HMAC signing key, or None when unavailable.
+
+        Reading the key must never be able to break model persistence: a missing
+        or incomplete ``.env`` simply means "signing is not configured".
+        """
+        try:
+            from src.core.config import get_config
+
+            return get_config().model_signing_key.get_secret_value() or None
+        except Exception as e:  # config may be absent or incomplete
+            logger.debug("model_signing_key_unavailable", error=str(e))
+            return None
+
     def save_model(self, filepath: str) -> None:
         """
         Persists the GMM model and cluster mappings to disk.
@@ -981,21 +996,19 @@ class RegimeDetector:
         joblib.dump(state, filepath)
         logger.info("model_saved", path=filepath)
 
-        # HMAC Signature generation
-        try:
-            from src.core.config import get_config
-            from src.utils.security import compute_hmac
+        # HMAC Signature generation (optional: only when a signing key is configured)
+        key = self._signing_key()
+        if key:
+            try:
+                from src.utils.security import compute_hmac
 
-            cfg = get_config()
-            key = cfg.model_signing_key.get_secret_value()
-            if key:
                 signature = compute_hmac(filepath, key)
                 sig_path = f"{filepath}.sig"
                 with open(sig_path, "w") as f:
                     f.write(signature)
                 logger.info("model_signed", sig_path=sig_path)
-        except Exception as e:
-            logger.warning("model_signing_failed", error=str(e))
+            except Exception as e:
+                logger.warning("model_signing_failed", error=str(e))
 
     def load_model(self, filepath: str) -> None:
         """
@@ -1042,14 +1055,16 @@ class RegimeDetector:
                 return
 
         # Security: Signature Verification
+        # A missing key means "signing is not configured" -> unsigned checkpoints stay
+        # loadable (with a warning). A key that exists but cannot validate the file is
+        # still fail-closed. Conflating the two used to make every saved regime model
+        # silently unloadable whenever the config could not be read (e.g. no .env yet).
+        sig_path = Path(f"{path}.sig")
         try:
-            from src.core.config import get_config
             from src.utils.security import verify_hmac
 
-            cfg = get_config()
-            key = cfg.model_signing_key.get_secret_value()
+            key = self._signing_key()
             if key:
-                sig_path = Path(f"{path}.sig")
                 if not sig_path.exists():
                     logger.error("Security violation: Missing signature for model: %s", path)
                     return
@@ -1059,6 +1074,19 @@ class RegimeDetector:
                     logger.error("Security violation: Invalid signature for model: %s", path)
                     return
                 logger.info("model_signature_verified", path=str(path))
+            elif sig_path.exists():
+                # The artifact is signed, but we cannot verify it -> fail-closed.
+                logger.error(
+                    "Security violation: model is signed but no signing key is available: %s",
+                    path,
+                )
+                return
+            else:
+                logger.warning(
+                    "model_signature_skipped",
+                    path=str(path),
+                    reason="no model_signing_key configured",
+                )
         except Exception as e:
             # Fail-closed if signature verification logic fails
             logger.error("Security violation: Signature verification failed: %s", e)

@@ -150,7 +150,9 @@ class LSTMPricePredictor(nn.Module if nn else object):
         Initializes the standard LSTM architecture.
 
         Args:
-            input_dim: Number of input features per time step.
+            input_dim: Number of input features per time step. When omitted, the
+                value is inferred from the ``model_path`` checkpoint, falling back
+                to 140 (the legacy default) for an untrained model.
             hidden_dim: Number of hidden units in LSTM layers.
             num_layers: Number of recurrent layers.
 
@@ -181,6 +183,39 @@ class LSTMPricePredictor(nn.Module if nn else object):
         return out
 
 
+DEFAULT_INPUT_DIM = 140
+
+
+def infer_input_dim_from_state_dict(state_dict: Any) -> int | None:
+    """Infer the feature dimension of a saved LSTM checkpoint.
+
+    Checkpoints are stored as a bare ``state_dict`` (see :meth:`LSTMModel.save`),
+    so the architecture has to be recovered from the weight shapes.  Reading
+    ``lstm.weight_ih_l0`` gives ``(4 * hidden_dim, input_dim)`` for both the
+    standard and the attention architectures.
+
+    Args:
+        state_dict: Mapping of parameter name -> tensor (or numpy array).
+
+    Returns:
+        The inferred input dimension, or ``None`` when it cannot be determined.
+    """
+    if not isinstance(state_dict, dict):
+        return None
+    for key in ("lstm.weight_ih_l0", "module.lstm.weight_ih_l0"):
+        weight = state_dict.get(key)
+        shape = getattr(weight, "shape", None)
+        if shape is not None and len(shape) == 2:
+            return int(shape[1])
+    # Attention architecture keeps an explicit input projection.
+    for key in ("input_projection.weight", "module.input_projection.weight"):
+        weight = state_dict.get(key)
+        shape = getattr(weight, "shape", None)
+        if shape is not None and len(shape) == 2:
+            return int(shape[1])
+    return None
+
+
 class LSTMModel(BaseModel):
     """
     Wrapper for LSTM-based models implementing the BaseModel interface.
@@ -200,7 +235,7 @@ class LSTMModel(BaseModel):
 
     def __init__(
         self,
-        input_dim: int = 140,
+        input_dim: int | None = None,
         hidden_dim: int = 64,
         num_layers: int = 2,
         model_path: str | Path | None = None,
@@ -212,7 +247,9 @@ class LSTMModel(BaseModel):
         Initializes the LSTMModel wrapper.
 
         Args:
-            input_dim: Number of input features per time step.
+            input_dim: Number of input features per time step. When omitted, the
+                value is inferred from the ``model_path`` checkpoint, falling back
+                to 140 (the legacy default) for an untrained model.
             hidden_dim: Number of hidden units in LSTM layers.
             num_layers: Number of recurrent layers.
             model_path: Optional path to a pre-trained model checkpoint (.pt or .pth).
@@ -233,6 +270,21 @@ class LSTMModel(BaseModel):
             self.device = None
 
         self.model = None
+        #: True only when weights were successfully restored from a checkpoint.
+        #: ``model`` alone is not enough: without a checkpoint the network is
+        #: randomly initialised and its predictions are pure noise.
+        self.weights_loaded = False
+
+        state_dict = None
+        if torch and model_path and Path(model_path).exists():
+            try:
+                state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
+            except Exception as exc:  # corrupt or incompatible checkpoint
+                self.logger.error("Failed to read LSTM checkpoint %s: %s", model_path, exc)
+                state_dict = None
+
+        if input_dim is None:
+            input_dim = infer_input_dim_from_state_dict(state_dict) or DEFAULT_INPUT_DIM
 
         if torch:
             try:
@@ -250,14 +302,24 @@ class LSTMModel(BaseModel):
                         input_dim, hidden_dim, num_layers, **model_kwargs
                     ).to(self.device)
 
-                if model_path and Path(model_path).exists():
+                if state_dict is not None:
                     self.logger.info(f"Loading LSTM model from {model_path}")
-                    self.model.load_state_dict(
-                        torch.load(model_path, map_location=self.device, weights_only=True)
-                    )
+                    self.model.load_state_dict(state_dict)
+                    self.model.to(self.device)
                     self.model.eval()
+                    self.weights_loaded = True
                 else:
-                    self.logger.debug("LSTMModel initialized with random weights.")
+                    if model_path:
+                        self.logger.warning(
+                            "LSTM checkpoint unusable - falling back to RANDOM weights",
+                            path=str(model_path),
+                            remedy="Re-run scripts/train_models.py (or train.bat) to produce a model.",
+                        )
+                    else:
+                        self.logger.warning(
+                            "LSTM initialised with RANDOM weights (no model_path). "
+                            "Predictions are meaningless until the model is trained."
+                        )
 
             except Exception as e:
                 self.logger.error(f"Failed to initialize LSTM model: {e}")

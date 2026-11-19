@@ -69,6 +69,10 @@ class PPOAgent(BaseModel):
         self.model = None
         self.env = None
         self.ppo_kwargs = ppo_kwargs or {}
+        #: True once real weights are loaded from ``model_path``.  A freshly
+        #: constructed policy (or a missing Stable-Baselines3 install) must never
+        #: be reported as a usable model.
+        self.weights_loaded = False
 
         if PPO is None:
             self.logger.warning("Stable-Baselines3 not installed. PPOAgent will be limited.")
@@ -81,6 +85,7 @@ class PPOAgent(BaseModel):
         if model_path and Path(model_path).exists():
             self.logger.info(f"Loading existing PPO model from {model_path}")
             self.model = PPO.load(model_path, env=self.env, device=device)
+            self.weights_loaded = True
         elif self.env is not None:
             self.logger.info("Creating new PPO model with MlpPolicy...")
             # Combine default parameters with user-provided kwargs
